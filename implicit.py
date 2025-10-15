@@ -298,7 +298,101 @@ class NeuralRadianceField(torch.nn.Module):
         embedding_dim_xyz = self.harmonic_embedding_xyz.output_dim
         embedding_dim_dir = self.harmonic_embedding_dir.output_dim
 
-        pass
+        # Get configuration parameters
+        n_layers = cfg.n_layers_xyz
+        hidden_dim = cfg.n_hidden_neurons_xyz
+        append_xyz = cfg.append_xyz if hasattr(cfg, 'append_xyz') else []
+
+        # Build MLP for processing position embeddings
+        # Use MLPWithInputSkips if skip connections are specified
+        if append_xyz:
+            self.mlp_xyz = MLPWithInputSkips(
+                n_layers=n_layers,
+                input_dim=embedding_dim_xyz,
+                output_dim=hidden_dim,
+                skip_dim=embedding_dim_xyz,
+                hidden_dim=hidden_dim,
+                input_skips=append_xyz
+            )
+        else:
+            # Build simple MLP without skip connections
+            layers = []
+            for i in range(n_layers):
+                if i == 0:
+                    layers.append(torch.nn.Linear(embedding_dim_xyz, hidden_dim))
+                else:
+                    layers.append(torch.nn.Linear(hidden_dim, hidden_dim))
+                layers.append(torch.nn.ReLU(True))
+            self.mlp_xyz = torch.nn.Sequential(*layers)
+
+        # Output layers
+        # Density head: outputs a single scalar for density
+        self.density_layer = torch.nn.Linear(hidden_dim, 1)
+
+        # Color head: outputs 3 values for RGB color
+        self.color_layer = torch.nn.Sequential(
+            torch.nn.Linear(hidden_dim, hidden_dim),
+            torch.nn.ReLU(True),
+            torch.nn.Linear(hidden_dim, 3)
+        )
+
+        # Store config for potential use
+        self.cfg = cfg
+        self.append_xyz = append_xyz
+    
+    # def positional_encoding(self, x):
+    #     # x: (..., 3)
+    #     if not self.use_pe:
+    #         return x
+    #     freqs = 2.0 ** torch.arange(self.num_freqs, device=x.device, dtype=x.dtype)  # (F,)
+    #     # (..., 3, 1) * (F,) -> (..., 3, F)
+    #     xb = x.unsqueeze(-1) * freqs
+    #     xb = torch.cat([torch.sin(xb), torch.cos(xb)], dim=-1)  # (..., 3, 2F)
+    #     xb = xb.view(*x.shape[:-1], -1)                         # (..., 3*2F)
+    #     return torch.cat([x, xb], dim=-1)                       # (..., 3*(1+2F))
+
+    def forward(self, ray_bundle: RayBundle):
+        """
+        Forward pass of NeRF MLP
+
+        Args:
+            ray_bundle: RayBundle object containing sample points
+
+        Returns:
+            dict with 'density' and 'feature' (color) keys
+        """
+        # Extract sample points from ray bundle
+        # sample_points has shape (..., n_samples, 3)
+        sample_points = ray_bundle.sample_points
+        original_shape = sample_points.shape[:-1]  # Save shape for later
+        sample_points_flat = sample_points.view(-1, 3)  # Flatten to (N, 3)
+
+        # Apply positional encoding to positions
+        embedded_xyz = self.harmonic_embedding_xyz(sample_points_flat)  # (N, embedding_dim_xyz)
+
+        # Pass through MLP
+        if self.append_xyz:
+            # If using skip connections, pass embedded input twice
+            features = self.mlp_xyz(embedded_xyz, embedded_xyz)
+        else:
+            features = self.mlp_xyz(embedded_xyz)
+
+        # Get density (with ReLU to ensure non-negative)
+        raw_density = self.density_layer(features)  # (N, 1)
+        density = torch.nn.functional.relu(raw_density)
+
+        # Get color (with Sigmoid to map to [0, 1])
+        raw_color = self.color_layer(features)  # (N, 3)
+        color = torch.sigmoid(raw_color)
+
+        # Reshape outputs back to original batch shape
+        density = density.view(*original_shape, 1)
+        color = color.view(*original_shape, 3)
+
+        return {
+            'density': density.squeeze(-1),  # Remove last dimension for density
+            'feature': color.view(-1, 3)  # Flatten color for compatibility
+        }
 
 
 class NeuralSurface(torch.nn.Module):
