@@ -89,10 +89,14 @@ def get_pixels_from_image(image_size, camera):
     W, H = image_size[0], image_size[1]
 
     # TODO (Q1.3): Generate pixel coordinates from [0, W] in x and [0, H] in y
-    pass
+    dtype = camera.R.dtype
+    device = camera.device
+    x = torch.arange(W, device=device, dtype=dtype)
+    y = torch.arange(H, device=device, dtype=dtype)
 
     # TODO (Q1.3): Convert to the range [-1, 1] in both x and y
-    pass
+    x = (x / (W - 1)) * 2.0 - 1.0
+    y = (y / (H - 1)) * 2.0 - 1.0
 
     # Create grid of coordinates
     xy_grid = torch.stack(
@@ -108,7 +112,8 @@ def get_random_pixels_from_image(n_pixels, image_size, camera):
     xy_grid = get_pixels_from_image(image_size, camera)
     
     # TODO (Q2.1): Random subsampling of pixel coordinaters
-    pass
+    perm = torch.randperm(xy_grid.shape[0], device=xy_grid.device)
+    xy_grid_sub = xy_grid[perm[:n_pixels]]
 
     # Return
     return xy_grid_sub.reshape(-1, 2)[:n_pixels]
@@ -119,7 +124,9 @@ def get_rays_from_pixels(xy_grid, image_size, camera):
     W, H = image_size[0], image_size[1]
 
     # TODO (Q1.3): Map pixels to points on the image plane at Z=1
-    pass
+    dtype = camera.R.dtype
+    device = camera.device
+    ndc_points = xy_grid.view(-1, 2).to(device=device, dtype=dtype)
 
     ndc_points = torch.cat(
         [
@@ -130,13 +137,20 @@ def get_rays_from_pixels(xy_grid, image_size, camera):
     )
 
     # TODO (Q1.3): Use camera.unproject to get world space points from NDC space points
-    pass
+    B = camera.R.shape[0]
+    ndc_points_batched = ndc_points.unsqueeze(0).expand(B, -1, -1)  # (B, N, 3)
+    image_plane_points = camera.unproject_points(ndc_points_batched)  # (B, N, 3)
 
     # TODO (Q1.3): Get ray origins from camera center
-    pass
+    rays_o = camera.get_camera_center().unsqueeze(1).expand(-1, image_plane_points.shape[1], -1)  # (B, N, 3)
+    # print("[DEBUG] should be (B, N, 3) ", rays_o.shape) #print out: torch.Size([1, 65536, 3])
 
     # TODO (Q1.3): Get ray directions as image_plane_points - rays_o
-    pass
+    rays_d = F.normalize(image_plane_points - rays_o, dim=-1)  # (B, N, 3)
+
+    rays_o = rays_o.reshape(-1, 3)   # flatten to (R, 3)
+    rays_d = rays_d.reshape(-1, 3)   # flatten (R, 3)
+    # print("[DEBUG] should be (R, 3)", rays_o.shape, rays_d.shape) # print out "should be (R, 3) torch.Size([65536, 3]) torch.Size([65536, 3])"
 
     # Create and return RayBundle
     return RayBundle(

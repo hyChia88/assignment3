@@ -108,6 +108,7 @@ def render_points(filename, points, image_size=256, color=[0.7, 0.7, 1], device=
     # rend = renderer(mesh, cameras=cameras, lights=lights)
     rend = rend.detach().cpu().numpy()[0, ..., :3]  # (B, H, W, 4) -> (H, W, 3)
     plt.imsave(filename, rend)
+    print(f'Saved rendering to {filename}')
 
     # The .cpu moves the tensor to GPU (if needed).
     return rend
@@ -125,7 +126,7 @@ def render_points_with_save(
         device = get_device()
 
     # Get the renderer.
-    points_renderer = get_points_renderer(image_size=image_size[0], radius=0.01)
+    points_renderer = get_points_renderer(image_size=image_size, radius=0.003)
 
     textures = torch.ones(points.size()).to(device)   # (1, N_v, 3)
     rgb = textures * torch.tensor(color).to(device)  # (1, N_v, 3)

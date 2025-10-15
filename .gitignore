@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Large data files
+data
+data/materials.png
+data/*.npz
+data/*.pth
+*.zip
+
+# Model checkpoints and outputs
+outputs/
+*.pth
+*.pt
+*.ckpt
+*.pkl
+
+# Generated images and videos
+images/
+*.gif
+*.mp4
+*.avi
+
+# macOS
+data/__MACOSX/
+__MACOSX/
+
+# Submodules/dependencies (if not needed in repo)
+pytorch3d/
+nerf_materials/
+
+# Compiled LaTeX
+*.aux
+*.log
+*.out
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+*.pdf
+
+# Temporary files
+*.tmp
+*.bak
+*.swp

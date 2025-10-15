@@ -34,7 +34,7 @@ from dataset import (
     get_nerf_datasets,
     trivial_collate,
 )
-
+from render_functions import render_points
 
 # Model class containing:
 #   1) Implicit volume defining the scene
@@ -98,18 +98,35 @@ def render_images(
 
         # TODO (Q1.3): Visualize xy grid using vis_grid
         if cam_idx == 0 and file_prefix == '':
-            pass
+            vis_grid(xy_grid, image_size)
+            xy_img = vis_grid(xy_grid, image_size)
+            plt.imshow(xy_img)
+            plt.axis("off")
+            plt.show()
+
 
         # TODO (Q1.3): Visualize rays using vis_rays
         if cam_idx == 0 and file_prefix == '':
-            pass
-        
+            ray_img = vis_rays(ray_bundle, image_size)
+            plt.imshow(ray_img)
+            plt.axis("off")
+            plt.show()
+
         # TODO (Q1.4): Implement point sampling along rays in sampler.py
-        pass
+        ray_bundle = model.sampler(ray_bundle)
 
         # TODO (Q1.4): Visualize sample points as point cloud
         if cam_idx == 0 and file_prefix == '':
-            pass
+            # points = ray_bundle.sample_points.reshape(-1, 3).unsqueeze(0).to(device)  # (1, R*n, 3)
+            points = ray_bundle.sample_points.reshape(-1, 3).unsqueeze(0).detach().cpu()
+            # print("[DEBUG] points shape:", points.shape, "generating sample_points...")
+            render_points(
+                filename='images/sample_points.png',
+                points=points,
+                image_size=image_size,
+                color=[0.7, 0.7, 1],
+                device=torch.device("cpu"),
+            )
 
         # TODO (Q1.5): Implement rendering in renderer.py
         out = model(ray_bundle)
@@ -124,7 +141,9 @@ def render_images(
 
         # TODO (Q1.5): Visualize depth
         if cam_idx == 2 and file_prefix == '':
-            pass
+            depth = out['depth'].view(image_size[1], image_size[0], 1).detach().cpu().numpy()
+            depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-8)
+            plt.imsave('images/depth.png', depth.squeeze(), cmap='viridis')
 
         # Save
         if save:
@@ -200,7 +219,7 @@ def train(
             out = model(ray_bundle)
 
             # TODO (Q2.2): Calculate loss
-            loss = None
+            loss = torch.nn.functional.mse_loss(out['feature'], rgb_gt)
 
             # Backprop
             optimizer.zero_grad()
