@@ -253,6 +253,17 @@ def render(
         model, cameras, cfg.data.image_size
     )
     imageio.mimsave('images/part_1.gif', [np.uint8(im * 255) for im in all_images], loop=0)
+    print("Rendered images successfully. save at images/part_1.gif")
+    # Display a few sample images in the notebook
+    fig, axes = plt.subplots(1, min(4, len(all_images)), figsize=(15, 4))
+    if len(all_images) == 1:
+        axes = [axes]
+    for i, ax in enumerate(axes):
+        ax.imshow(all_images[i])
+        ax.axis('off')
+        ax.set_title(f'View {i}')
+    plt.tight_layout()
+    plt.show()
 
 
 def train(
@@ -334,6 +345,17 @@ def train(
         model, create_surround_cameras(3.0, n_poses=20), image_size, file_prefix='part_2'
     )
     imageio.mimsave('images/part_2.gif', [np.uint8(im * 255) for im in all_images], loop=0)
+    print("Rendered images successfully. save at images/part_2.gif")
+    # Display a few sample images in the notebook
+    fig, axes = plt.subplots(1, min(4, len(all_images)), figsize=(15, 4))
+    if len(all_images) == 1:
+        axes = [axes]
+    for i, ax in enumerate(axes):
+        ax.imshow(all_images[i])
+        ax.axis('off')
+        ax.set_title(f'View {i}')
+    plt.tight_layout()
+    plt.show()
 
 
 def create_model(cfg):
@@ -479,6 +501,16 @@ def train_nerf(
                 )
                 imageio.mimsave('images/part_3.gif', [np.uint8(im * 255) for im in test_images], loop=0)
                 print("Saved nerf rendering to images/part_3.gif")
+                # Display a few sample images in the notebook
+                fig, axes = plt.subplots(1, min(4, len(all_images)), figsize=(15, 4))
+                if len(all_images) == 1:
+                    axes = [axes]
+                for i, ax in enumerate(axes):
+                    ax.imshow(all_images[i])
+                    ax.axis('off')
+                    ax.set_title(f'View {i}')
+                plt.tight_layout()
+                plt.show()
 
 
 def train_nerf_coarse_fine(cfg):
@@ -622,6 +654,17 @@ def train_nerf_coarse_fine(cfg):
                     loop=0
                 )
                 print(f"Saved rendering to images/part_4_2_epoch_{epoch}.gif")
+                print("Rendered images successfully. save at images/part_1.gif")
+                # Display a few sample images in the notebook
+                fig, axes = plt.subplots(1, min(4, len(all_images)), figsize=(15, 4))
+                if len(all_images) == 1:
+                    axes = [axes]
+                for i, ax in enumerate(axes):
+                    ax.imshow(all_images[i])
+                    ax.axis('off')
+                    ax.set_title(f'View {i}')
+                plt.tight_layout()
+                plt.show()
 
             model.train()
 

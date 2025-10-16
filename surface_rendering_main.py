@@ -154,6 +154,17 @@ def render(
         model, cameras, cfg.data.image_size
     )
     imageio.mimsave('images/part_5.gif', [np.uint8(im * 255) for im in all_images],loop=0)
+    print("Rendered images successfully. save at images/part_5.gif")
+    # Display a few sample images in the notebook
+    fig, axes = plt.subplots(1, min(4, len(test_images)), figsize=(15, 4))
+    if len(test_images) == 1:
+        axes = [axes]
+    for i, ax in enumerate(axes):
+        ax.imshow(test_images[i])
+        ax.axis('off')
+        ax.set_title(f'View {i}')
+    plt.tight_layout()
+    plt.show()     
 
 
 def create_model(cfg):
@@ -212,6 +223,8 @@ def create_model(cfg):
 def train_points(
     cfg
 ):
+    print("[DEBUG] Configuration:\n", OmegaConf.to_yaml(cfg))
+    print("[DEBUG] STARTING TRAINING train_points")
     # Create model
     model, optimizer, lr_scheduler, start_epoch, checkpoint_path = create_model(cfg)
 
@@ -228,12 +241,23 @@ def train_points(
         cfg.data.image_size, file_prefix='points'
     )
     imageio.mimsave('images/part_6_input.gif', [np.uint8(im * 255) for im in point_images], loop=0)
+    print("Rendered input point cloud successfully. save at images/part_6_input.gif")
+    # Display a few sample images in the notebook
+    fig, axes = plt.subplots(1, min(4, len(test_images)), figsize=(15, 4))
+    if len(test_images) == 1:
+        axes = [axes]
+    for i, ax in enumerate(axes):
+        ax.imshow(test_images[i])
+        ax.axis('off')
+        ax.set_title(f'View {i}')
+    plt.tight_layout()
+    plt.show()
 
     # Run the main training loop.
     for epoch in range(0, cfg.training.num_epochs):
         t_range = tqdm.tqdm(range(0, all_points.shape[0], cfg.training.batch_size))
 
-        for idx in t_range:
+        for batch_idx, idx in enumerate(t_range):
             # Select random points from pointcloud
             points = select_random_points(all_points, cfg.training.batch_size)
 
@@ -259,8 +283,10 @@ def train_points(
             loss.backward()
             optimizer.step()
 
-            t_range.set_description(f'Epoch: {epoch:04d}, Loss: {point_loss:.06f}')
-            t_range.refresh()
+            # Update progress bar every 100 batches
+            if batch_idx % 100 == 0:
+                t_range.set_description(f'Epoch: {epoch:04d}, Loss: {point_loss:.06f}')
+                t_range.refresh()
 
         # Checkpoint.
         if (
@@ -289,6 +315,18 @@ def train_points(
                     cfg.data.image_size, file_prefix='eikonal', thresh=0.002,
                 )
                 imageio.mimsave('images/part_6.gif', [np.uint8(im * 255) for im in test_images], loop=0)
+                print("Rendered geometry successfully. save at images/part_6.gif")
+
+                # Display a few sample images in the notebook
+                fig, axes = plt.subplots(1, min(4, len(test_images)), figsize=(15, 4))
+                if len(test_images) == 1:
+                    axes = [axes]
+                for i, ax in enumerate(axes):
+                    ax.imshow(test_images[i])
+                    ax.axis('off')
+                    ax.set_title(f'View {i}')
+                plt.tight_layout()
+                plt.show()
             except Exception as e:
                 print("Empty mesh")
                 pass
@@ -437,6 +475,17 @@ def train_images(
                     cfg.data.image_size, file_prefix='volsdf_geometry'
                 )
                 imageio.mimsave('images/part_7_geometry.gif', [np.uint8(im * 255) for im in test_images], loop=0)
+                print("Rendered input point cloud successfully. save at images/part_7_geometry.gif")
+                # Display a few sample images in the notebook
+                fig, axes = plt.subplots(1, min(4, len(test_images)), figsize=(15, 4))
+                if len(test_images) == 1:
+                    axes = [axes]
+                for i, ax in enumerate(axes):
+                    ax.imshow(test_images[i])
+                    ax.axis('off')
+                    ax.set_title(f'View {i}')
+                plt.tight_layout()
+                plt.show()
             except Exception as e:
                 print("Empty mesh")
                 pass
