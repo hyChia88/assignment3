@@ -140,7 +140,13 @@ def render(
 ):
     # Create model
     model = Model(cfg)
-    model = model.cuda(); model.eval()
+    # model = model.cuda(); model.eval()
+    if torch.cuda.is_available():
+        model = model.cuda()
+    else:
+        model = model.to('cpu')
+        print("Running on CPU - this will be slower!")
+    model.eval()
 
     # Render spiral
     cameras = create_surround_cameras(3.0, n_poses=20, up=(0.0, 0.0, 1.0))
