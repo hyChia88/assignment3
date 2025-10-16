@@ -7,7 +7,7 @@ import torch
 import tqdm
 import imageio
 
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from pytorch3d.renderer import (
     PerspectiveCameras,
@@ -429,8 +429,10 @@ def main(cfg: DictConfig):
 
     # Convert image_size from Hydra ListConfig to native Python list
     # This ensures compatibility with PyTorch3D which doesn't support ListConfig
+    # We need to set struct=False to allow modification
+    OmegaConf.set_struct(cfg, False)
     if hasattr(cfg.data, 'image_size'):
-        cfg.data.image_size = list(cfg.data.image_size)
+        cfg.data.image_size = OmegaConf.to_container(cfg.data.image_size, resolve=True)
 
     if cfg.type == 'render':
         render(cfg)
