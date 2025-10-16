@@ -258,8 +258,19 @@ class SphereTracingRenderer(torch.nn.Module):
 
 def sdf_to_density(signed_distance, alpha, beta):
     # TODO (Q7): Convert signed distance to density with alpha, beta parameters
-    density = alpha * torch.exp(-signed_distance / beta).clamp(min=0.0)
-    return density
+    """
+      Convert SDF to density using Laplace CDF (VolSDF paper Section 3.1)
+      
+      The Laplace CDF is: Φ(x) = 0.5 + 0.5 * sign(x) * (1 - exp(-|x|/β))
+      Density: σ(s) = α * Φ(-s/β) 
+      
+      Intuition:
+      - alpha: controls overall density magnitude (higher = more opaque)
+      - beta: controls transition sharpness near surface (lower = sharper)
+      """
+      # Apply Laplace CDF to negative SDF
+      psi = torch.sigmoid(-signed_distance / beta)
+      return alpha * psi
 
 class VolumeSDFRenderer(VolumeRenderer):
     def __init__(

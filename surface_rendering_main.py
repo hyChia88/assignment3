@@ -317,7 +317,23 @@ def pretrain_sdf(
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+    # Add:try next
+    # for iter in range(0, cfg.training.pretrain_iters):
+    #   points = get_random_points(cfg.training.batch_size, cfg.training.bounds, 'cuda')
 
+    #   distances = model.implicit_fn.get_distance(points)
+
+    #   # Initialize to smaller sphere inside scene
+    #   target_radius = 0.5
+    #   loss = sphere_loss(distances, points, target_radius)
+
+    #   # Add eikonal loss from the start
+    #   _, gradients = model.implicit_fn.get_distance_and_gradient(points)
+    #   loss += eikonal_loss(gradients) * 0.1
+
+    #   optimizer.zero_grad()
+    #   loss.backward()
+    #   optimizer.step()
 
 def train_images(
     cfg
