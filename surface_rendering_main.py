@@ -442,6 +442,28 @@ def train_images(
         # Adjust the learning rate.
         lr_scheduler.step()
 
+        # Quick preview every 100 epochs
+        if epoch % 50 == 0 and epoch > 0:
+            print(f"\n[Epoch {epoch}] Quick preview...")
+            with torch.no_grad():
+                model.eval()
+                preview_images = render_images(
+                    model, create_surround_cameras(4.0, n_poses=4, up=(0.0, 0.0, 1.0), focal_length=2.0),
+                    cfg.data.image_size, file_prefix=f'preview_{epoch}'
+                )
+                # Display preview in notebook
+                fig, axes = plt.subplots(1, len(preview_images), figsize=(12, 3))
+                if len(preview_images) == 1:
+                    axes = [axes]
+                for i, ax in enumerate(axes):
+                    ax.imshow(preview_images[i])
+                    ax.axis('off')
+                    ax.set_title(f'View {i}')
+                plt.suptitle(f'Epoch {epoch}')
+                plt.tight_layout()
+                plt.show()
+                model.train()
+
         # Checkpoint.
         if (
             epoch % cfg.training.checkpoint_interval == 0

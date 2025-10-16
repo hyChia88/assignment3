@@ -415,7 +415,7 @@ class NeuralSurface(torch.nn.Module):
         # ===== STEP 1: Positional Encoding =====
         # Use harmonic embedding to capture high-frequency details
         # Same as NeRF, but we only need position (no view direction for SDF)
-        n_harmonic_functions = cfg.get('n_harmonic_functions', 6)
+        n_harmonic_functions = cfg.get('n_harmonic_functions_xyz', cfg.get('n_harmonic_functions', 6))
         self.harmonic_embedding = HarmonicEmbedding(
             in_channels=3,  # xyz coordinates
             n_harmonic_functions=n_harmonic_functions,
@@ -425,10 +425,10 @@ class NeuralSurface(torch.nn.Module):
         embedding_dim = self.harmonic_embedding.output_dim
 
         # ===== STEP 2: MLP Architecture =====
-        # Configuration
-        n_layers = cfg.get('n_layers', 8)
-        hidden_dim = cfg.get('n_hidden_neurons', 256)
-        skip_connections = cfg.get('skip_connections', [4])  # Add skip at layer 4
+        # Configuration - support both naming conventions
+        n_layers = cfg.get('n_layers_distance', cfg.get('n_layers', 8))
+        hidden_dim = cfg.get('n_hidden_neurons_distance', cfg.get('n_hidden_neurons', 256))
+        skip_connections = cfg.get('append_distance', cfg.get('skip_connections', []))
 
         # Build MLP with skip connections (like NeRF)
         # Skip connections help with gradient flow and learning details
@@ -459,17 +459,23 @@ class NeuralSurface(torch.nn.Module):
         self.distance_layer = torch.nn.Linear(hidden_dim, 1)
 
         # Color head: outputs RGB (3 values)
-        # Will be implemented in Q7
-        # For now, we create it but it's optional
-        if cfg.get('predict_color', False):
-            self.color_layer = torch.nn.Sequential(
-                torch.nn.Linear(hidden_dim, hidden_dim),
-                torch.nn.ReLU(True),
-                torch.nn.Linear(hidden_dim, 3),
-                torch.nn.Sigmoid()  # Map to [0, 1] for RGB
-            )
-        else:
-            self.color_layer = None
+        # Can use separate MLP for color or simple head
+        n_layers_color = cfg.get('n_layers_color', 2)
+        n_hidden_neurons_color = cfg.get('n_hidden_neurons_color', hidden_dim)
+
+        # Build color MLP
+        color_layers = []
+        for i in range(n_layers_color):
+            if i == 0:
+                color_layers.append(torch.nn.Linear(hidden_dim, n_hidden_neurons_color))
+            else:
+                color_layers.append(torch.nn.Linear(n_hidden_neurons_color, n_hidden_neurons_color))
+            color_layers.append(torch.nn.ReLU(True))
+        # Final color output layer
+        color_layers.append(torch.nn.Linear(n_hidden_neurons_color, 3))
+        color_layers.append(torch.nn.Sigmoid())  # Map to [0, 1] for RGB
+
+        self.color_layer = torch.nn.Sequential(*color_layers)
 
         self.cfg = cfg
         self.skip_connections = skip_connections
@@ -526,10 +532,6 @@ class NeuralSurface(torch.nn.Module):
         '''
         points = points.view(-1, 3)
 
-        if self.color_layer is None:
-            # If no color prediction, return white
-            return torch.ones(points.shape[0], 3, device=points.device)
-
         # Reuse computation from distance prediction
         # Step 1: Positional encoding
         embedded = self.harmonic_embedding(points)
@@ -568,11 +570,7 @@ class NeuralSurface(torch.nn.Module):
 
         # Separate heads
         distance = self.distance_layer(features)  # (N, 1)
-
-        if self.color_layer is not None:
-            color = self.color_layer(features)  # (N, 3)
-        else:
-            color = torch.ones(points.shape[0], 3, device=points.device)
+        color = self.color_layer(features)  # (N, 3)
 
         return distance, color
 
