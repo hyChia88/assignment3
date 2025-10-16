@@ -113,6 +113,30 @@ def render_points(filename, points, image_size=256, color=[0.7, 0.7, 1], device=
     # The .cpu moves the tensor to GPU (if needed).
     return rend
 
+#Add
+from omegaconf import OmegaConf
+from omegaconf.listconfig import ListConfig
+
+def _normalize_image_size(image_size):
+    # 把 Hydra 的 ListConfig / 嵌套列表 转成 (H, W) 的纯 int 元组或单个 int
+    if isinstance(image_size, ListConfig):
+        image_size = OmegaConf.to_container(image_size, resolve=True)
+
+    if isinstance(image_size, (list, tuple)):
+        # 展平一层可能的嵌套，如 [[256, 256]] 或 [ [256], [256] ]
+        flat = []
+        for x in image_size:
+            if isinstance(x, (list, tuple)):
+                flat.extend(x)
+            else:
+                flat.append(x)
+        if len(flat) == 1:
+            return int(flat[0])              # 传单个 int：方形图像
+        elif len(flat) >= 2:
+            return (int(flat[0]), int(flat[1]))  # 只取前两个 (H, W)
+    # 其他情况都当成单个 int
+    return int(image_size)
+
 def render_points_with_save(
     points,
     cameras,
@@ -125,6 +149,7 @@ def render_points_with_save(
     if device is None:
         device = get_device()
 
+    image_size = _normalize_image_size(image_size)
     # Get the renderer.
     points_renderer = get_points_renderer(image_size=image_size, radius=0.003)
 

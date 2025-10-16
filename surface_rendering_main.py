@@ -427,12 +427,9 @@ def train_images(
 def main(cfg: DictConfig):
     os.chdir(hydra.utils.get_original_cwd())
 
-    # Convert image_size from Hydra ListConfig to native Python list
-    # This ensures compatibility with PyTorch3D which doesn't support ListConfig
-    # We need to set struct=False to allow modification
-    OmegaConf.set_struct(cfg, False)
+    from render_functions import _normalize_image_size
     if hasattr(cfg.data, 'image_size'):
-        cfg.data.image_size = OmegaConf.to_container(cfg.data.image_size, resolve=True)
+        cfg.data.image_size = _normalize_image_size(cfg.data.image_size)
 
     if cfg.type == 'render':
         render(cfg)
