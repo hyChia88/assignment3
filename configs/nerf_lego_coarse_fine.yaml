@@ -1,0 +1,55 @@
+seed: 1
+
+type: train_nerf_coarse_fine
+
+training:
+  num_epochs: 21
+  batch_size: 1024
+  lr: 0.0005
+
+  lr_scheduler_step_size: 50
+  lr_scheduler_gamma: 0.5
+
+  checkpoint_path: ./checkpoints_coarse_fine
+  checkpoint_interval: 50
+  resume: False
+
+  render_interval: 10
+
+  # Loss weights
+  coarse_weight: 0.5  # Weight for coarse network loss
+  fine_weight: 1.0    # Weight for fine network loss
+
+data:
+  image_size: [128, 128]
+  dataset_name: lego
+
+renderer:
+  type: volume
+  chunk_size: 32768
+  white_background: False
+
+# Coarse sampler: fewer samples
+sampler_coarse:
+  type: stratified
+  n_pts_per_ray: 64
+  min_depth: 2.0
+  max_depth: 6.0
+
+# Fine sampler: hierarchical importance sampling
+sampler_fine:
+  type: hierarchical
+  n_pts_per_ray: 128  # Additional fine samples
+  min_depth: 2.0
+  max_depth: 6.0
+
+implicit_function:
+  type: nerf
+
+  n_harmonic_functions_xyz: 10
+  n_harmonic_functions_dir: 4
+  n_hidden_neurons_xyz: 256
+  n_hidden_neurons_dir: 128
+  density_noise_std: 0.0
+  n_layers_xyz: 8
+  append_xyz: [4]

@@ -62,7 +62,7 @@ class Model(torch.nn.Module):
         self.renderer = renderer_dict[cfg.renderer.type](
             cfg.renderer
         )
-    
+
     def forward(
         self,
         ray_bundle
@@ -76,6 +76,85 @@ class Model(torch.nn.Module):
             self.implicit_fn,
             ray_bundle
         )
+
+# 4. NeRF Extras (CHOOSE ONE! More than one is extra credit)
+class CoarseFineModel(torch.nn.Module):
+    """
+    Model with separate coarse and fine networks for hierarchical sampling.
+    """
+    def __init__(self, cfg):
+        super().__init__()
+
+        # Coarse network
+        self.coarse_implicit_fn = implicit_dict[cfg.implicit_function.type](
+            cfg.implicit_function
+        )
+        self.coarse_sampler = sampler_dict[cfg.sampler_coarse.type](
+            cfg.sampler_coarse
+        )
+        self.coarse_renderer = renderer_dict[cfg.renderer.type](
+            cfg.renderer
+        )
+
+        # Fine network (same architecture as coarse, separate parameters)
+        self.fine_implicit_fn = implicit_dict[cfg.implicit_function.type](
+            cfg.implicit_function
+        )
+        self.fine_sampler = sampler_dict[cfg.sampler_fine.type](
+            cfg.sampler_fine
+        )
+        self.fine_renderer = renderer_dict[cfg.renderer.type](
+            cfg.renderer
+        )
+
+    def forward(self, ray_bundle, return_coarse=True):
+        """
+        Two-pass rendering: coarse then fine.
+
+        Args:
+            ray_bundle: RayBundle with ray origins and directions
+            return_coarse: If True, return both coarse and fine outputs
+
+        Returns:
+            dict with 'coarse' and 'fine' keys (if return_coarse=True)
+            or just fine output
+        """
+        # Coarse pass
+        coarse_ray_bundle = self.coarse_sampler(ray_bundle)
+        n_pts_coarse = coarse_ray_bundle.sample_shape[1]
+
+        # Render with coarse network
+        coarse_output = self.coarse_renderer._render_with_implicit(
+            coarse_ray_bundle,
+            self.coarse_implicit_fn,
+            n_pts_coarse
+        )
+
+        # Fine pass with importance sampling
+        # Use coarse weights for hierarchical sampling
+        coarse_weights = coarse_output['weights']  # (B, n_pts_coarse, 1)
+
+        # Sample fine points using hierarchical sampler
+        fine_ray_bundle = self.fine_sampler(
+            coarse_ray_bundle,
+            coarse_weights=coarse_weights.squeeze(-1)
+        )
+        n_pts_fine = fine_ray_bundle.sample_shape[1]
+
+        # Render with fine network
+        fine_output = self.fine_renderer._render_with_implicit(
+            fine_ray_bundle,
+            self.fine_implicit_fn,
+            n_pts_fine
+        )
+
+        if return_coarse:
+            return {
+                'coarse': coarse_output,
+                'fine': fine_output
+            }
+        else:
+            return fine_output
 
 
 def render_images(
@@ -260,7 +339,12 @@ def train(
 def create_model(cfg):
     # Create model
     model = Model(cfg)
-    model.cuda(); model.train()
+    if torch.cuda.is_available():
+        model = model.cuda()
+    else:
+        model = model.to('cpu')
+        print("Running on CPU - this will be slower!")
+    model.train()
 
     # Load checkpoints
     optimizer_state_dict = None
@@ -314,6 +398,7 @@ def train_nerf(
     cfg
 ):
     # Create model
+    print("[DEBUG] Start training NeRF...")
     model, optimizer, lr_scheduler, start_epoch, checkpoint_path = create_model(cfg)
 
     # Load the training/validation data.
@@ -336,8 +421,9 @@ def train_nerf(
 
         for iteration, batch in t_range:
             image, camera, camera_idx = batch[0].values()
-            image = image.cuda().unsqueeze(0)
-            camera = camera.cuda()
+            device = next(model.parameters()).device
+            image = image.to(device).unsqueeze(0)
+            camera = camera.to(device)
 
             # Sample rays
             xy_grid = get_random_pixels_from_image(
@@ -392,6 +478,154 @@ def train_nerf(
                     cfg.data.image_size, file_prefix='nerf'
                 )
                 imageio.mimsave('images/part_3.gif', [np.uint8(im * 255) for im in test_images], loop=0)
+                print("Saved nerf rendering to images/part_3.gif")
+
+
+def train_nerf_coarse_fine(cfg):
+    """
+    Training function for coarse-fine NeRF (Q4.2).
+    Uses hierarchical importance sampling with separate coarse and fine networks.
+    """
+    print("[DEBUG] Start training Coarse-Fine NeRF...")
+
+    # Create coarse-fine model
+    model = CoarseFineModel(cfg)
+    if torch.cuda.is_available():
+        model = model.cuda()
+    else:
+        model = model.to('cpu')
+        print("Running on CPU - this will be slower!")
+    model.train()
+
+    # Load training data
+    train_dataset, val_dataset, _ = get_nerf_datasets(
+        dataset_name=cfg.data.dataset_name,
+        image_size=[cfg.data.image_size[1], cfg.data.image_size[0]],
+    )
+
+    train_dataloader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=1,
+        shuffle=True,
+        num_workers=0,
+        collate_fn=trivial_collate,
+    )
+
+    # Optimizer for both networks
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=cfg.training.lr,
+    )
+
+    # Learning rate scheduler
+    def lr_lambda(epoch):
+        return cfg.training.lr_scheduler_gamma ** (
+            epoch / cfg.training.lr_scheduler_step_size
+        )
+
+    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lr_lambda
+    )
+
+    # Loss weights
+    coarse_weight = cfg.training.coarse_weight if 'coarse_weight' in cfg.training else 0.5
+    fine_weight = cfg.training.fine_weight if 'fine_weight' in cfg.training else 1.0
+
+    # Training loop
+    for epoch in range(cfg.training.num_epochs):
+        t_range = tqdm.tqdm(enumerate(train_dataloader))
+        epoch_loss_coarse = 0.0
+        epoch_loss_fine = 0.0
+        epoch_loss_total = 0.0
+
+        for iteration, batch in t_range:
+            image, camera, camera_idx = batch[0].values()
+            device = next(model.parameters()).device
+            image = image.to(device).unsqueeze(0)
+            camera = camera.to(device)
+
+            # Sample rays
+            xy_grid = get_random_pixels_from_image(
+                cfg.training.batch_size, cfg.data.image_size, camera
+            )
+            ray_bundle = get_rays_from_pixels(
+                xy_grid, cfg.data.image_size, camera
+            )
+            rgb_gt = sample_images_at_xy(image, xy_grid)
+
+            # Forward pass: get both coarse and fine outputs
+            outputs = model(ray_bundle, return_coarse=True)
+
+            # Compute losses
+            loss_coarse = torch.nn.functional.mse_loss(
+                outputs['coarse']['feature'], rgb_gt
+            )
+            loss_fine = torch.nn.functional.mse_loss(
+                outputs['fine']['feature'], rgb_gt
+            )
+
+            # Total loss is weighted sum
+            loss = coarse_weight * loss_coarse + fine_weight * loss_fine
+
+            # Backprop
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # Track losses
+            epoch_loss_coarse += loss_coarse.item()
+            epoch_loss_fine += loss_fine.item()
+            epoch_loss_total += loss.item()
+
+            t_range.set_description(
+                f'Epoch: {epoch:04d}, Loss: {loss:.06f} '
+                f'(Coarse: {loss_coarse:.06f}, Fine: {loss_fine:.06f})'
+            )
+            t_range.refresh()
+
+        # Update learning rate
+        lr_scheduler.step()
+
+        # Average losses for the epoch
+        n_batches = len(train_dataloader)
+        print(f"Epoch {epoch}: Avg Loss = {epoch_loss_total/n_batches:.6f}, "
+              f"Coarse = {epoch_loss_coarse/n_batches:.6f}, "
+              f"Fine = {epoch_loss_fine/n_batches:.6f}")
+
+        # Render test images
+        if (epoch % cfg.training.render_interval == 0 and epoch > 0):
+            model.eval()
+            with torch.no_grad():
+                test_cameras = create_surround_cameras(
+                    4.0, n_poses=20, up=(0.0, 0.0, 1.0), focal_length=2.0
+                )
+                test_images = []
+
+                for camera in test_cameras:
+                    camera = camera.to(device)
+                    xy_grid = get_pixels_from_image(cfg.data.image_size, camera)
+                    ray_bundle = get_rays_from_pixels(xy_grid, cfg.data.image_size, camera)
+
+                    # Use only fine network for rendering
+                    output = model(ray_bundle, return_coarse=False)
+
+                    image = np.array(
+                        output['feature'].view(
+                            cfg.data.image_size[1], cfg.data.image_size[0], 3
+                        ).detach().cpu()
+                    )
+                    test_images.append(image)
+
+                imageio.mimsave(
+                    f'images/part_4_2_epoch_{epoch}.gif',
+                    [np.uint8(im * 255) for im in test_images],
+                    loop=0
+                )
+                print(f"Saved rendering to images/part_4_2_epoch_{epoch}.gif")
+
+            model.train()
+
+    print("Training complete!")
 
 
 @hydra.main(config_path='./configs', config_name='sphere')
@@ -404,6 +638,8 @@ def main(cfg: DictConfig):
         train(cfg)
     elif cfg.type == 'train_nerf':
         train_nerf(cfg)
+    elif cfg.type == 'train_nerf_coarse_fine':
+        train_nerf_coarse_fine(cfg)
 
 
 if __name__ == "__main__":

@@ -203,7 +203,7 @@ def create_model(cfg):
         )
 
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lr_lambda, last_epoch=start_epoch - 1, verbose=False
+        optimizer, lr_lambda, last_epoch=start_epoch - 1
     )
 
     return model, optimizer, lr_scheduler, start_epoch, checkpoint_path
@@ -426,6 +426,11 @@ def train_images(
 @hydra.main(config_path='configs', config_name='torus')
 def main(cfg: DictConfig):
     os.chdir(hydra.utils.get_original_cwd())
+
+    # Convert image_size from Hydra ListConfig to native Python list
+    # This ensures compatibility with PyTorch3D which doesn't support ListConfig
+    if hasattr(cfg.data, 'image_size'):
+        cfg.data.image_size = list(cfg.data.image_size)
 
     if cfg.type == 'render':
         render(cfg)

@@ -396,6 +396,14 @@ class NeuralRadianceField(torch.nn.Module):
 
 
 class NeuralSurface(torch.nn.Module):
+    """
+    Neural SDF: MLP that predicts signed distance from any 3D point to the surface.
+
+    Key differences from NeRF:
+    1. Output: SDF (unbounded, can be negative) vs Density (non-negative)
+    2. Activation: NO activation on SDF output vs ReLU for density
+    3. Training: Supervised on point cloud + eikonal regularization
+    """
     def __init__(
         self,
         cfg,
@@ -404,43 +412,172 @@ class NeuralSurface(torch.nn.Module):
         # TODO (Q6): Implement Neural Surface MLP to output per-point SDF
         # TODO (Q7): Implement Neural Surface MLP to output per-point color
 
+        # ===== STEP 1: Positional Encoding =====
+        # Use harmonic embedding to capture high-frequency details
+        # Same as NeRF, but we only need position (no view direction for SDF)
+        n_harmonic_functions = cfg.get('n_harmonic_functions', 6)
+        self.harmonic_embedding = HarmonicEmbedding(
+            in_channels=3,  # xyz coordinates
+            n_harmonic_functions=n_harmonic_functions,
+            include_input=True
+        )
+
+        embedding_dim = self.harmonic_embedding.output_dim
+
+        # ===== STEP 2: MLP Architecture =====
+        # Configuration
+        n_layers = cfg.get('n_layers', 8)
+        hidden_dim = cfg.get('n_hidden_neurons', 256)
+        skip_connections = cfg.get('skip_connections', [4])  # Add skip at layer 4
+
+        # Build MLP with skip connections (like NeRF)
+        # Skip connections help with gradient flow and learning details
+        if skip_connections:
+            self.sdf_mlp = MLPWithInputSkips(
+                n_layers=n_layers,
+                input_dim=embedding_dim,
+                output_dim=hidden_dim,
+                skip_dim=embedding_dim,
+                hidden_dim=hidden_dim,
+                input_skips=skip_connections
+            )
+        else:
+            # Simple MLP without skips
+            layers = []
+            for i in range(n_layers):
+                if i == 0:
+                    layers.append(torch.nn.Linear(embedding_dim, hidden_dim))
+                else:
+                    layers.append(torch.nn.Linear(hidden_dim, hidden_dim))
+                layers.append(torch.nn.ReLU(True))
+            self.sdf_mlp = torch.nn.Sequential(*layers)
+
+        # ===== STEP 3: Output Heads =====
+
+        # Distance head: outputs SDF value (1 scalar)
+        # CRITICAL: NO activation! SDF can be negative (inside) or positive (outside)
+        self.distance_layer = torch.nn.Linear(hidden_dim, 1)
+
+        # Color head: outputs RGB (3 values)
+        # Will be implemented in Q7
+        # For now, we create it but it's optional
+        if cfg.get('predict_color', False):
+            self.color_layer = torch.nn.Sequential(
+                torch.nn.Linear(hidden_dim, hidden_dim),
+                torch.nn.ReLU(True),
+                torch.nn.Linear(hidden_dim, 3),
+                torch.nn.Sigmoid()  # Map to [0, 1] for RGB
+            )
+        else:
+            self.color_layer = None
+
+        self.cfg = cfg
+        self.skip_connections = skip_connections
+
     def get_distance(
         self,
         points
     ):
         '''
-        TODO: Q6
+        Predict SDF value for input points.
+
+        Args:
+            points: (N, 3) or (..., 3) tensor of 3D coordinates
+
         Output:
-            distance: N X 1 Tensor, where N is number of input points
+            distance: (N, 1) tensor of signed distances
+                     - Negative: inside surface
+                     - Zero: on surface
+                     - Positive: outside surface
         '''
+        # Flatten to (N, 3)
         points = points.view(-1, 3)
-        pass
-    
+
+        # Step 1: Positional encoding
+        # Transform xyz → high-dimensional embedding
+        embedded = self.harmonic_embedding(points)  # (N, embedding_dim)
+
+        # Step 2: Pass through MLP
+        if self.skip_connections:
+            # With skip connections
+            features = self.sdf_mlp(embedded, embedded)
+        else:
+            # Without skip connections
+            features = self.sdf_mlp(embedded)
+
+        # Step 3: Predict SDF
+        # IMPORTANT: No activation! SDF can be any real number
+        distance = self.distance_layer(features)  # (N, 1)
+
+        return distance
+
     def get_color(
         self,
         points
     ):
         '''
-        TODO: Q7
+        Predict RGB color for input points.
+
+        Args:
+            points: (N, 3) tensor of 3D coordinates
+
         Output:
-            distance: N X 3 Tensor, where N is number of input points
+            color: (N, 3) tensor of RGB values in [0, 1]
         '''
         points = points.view(-1, 3)
-        pass
-    
+
+        if self.color_layer is None:
+            # If no color prediction, return white
+            return torch.ones(points.shape[0], 3, device=points.device)
+
+        # Reuse computation from distance prediction
+        # Step 1: Positional encoding
+        embedded = self.harmonic_embedding(points)
+
+        # Step 2: MLP features
+        if self.skip_connections:
+            features = self.sdf_mlp(embedded, embedded)
+        else:
+            features = self.sdf_mlp(embedded)
+
+        # Step 3: Predict color
+        color = self.color_layer(features)  # (N, 3) in [0, 1]
+
+        return color
+
     def get_distance_color(
         self,
         points
     ):
         '''
-        TODO: Q7
+        Efficiently compute both distance and color by sharing computation.
+
         Output:
-            distance, points: N X 1, N X 3 Tensors, where N is number of input points
-        You may just implement this by independent calls to get_distance, get_color
-            but, depending on your MLP implementation, it maybe more efficient to share some computation
+            distance: (N, 1) tensor
+            color: (N, 3) tensor
         '''
-        
+        points = points.view(-1, 3)
+
+        # Shared computation: embedding and MLP features
+        embedded = self.harmonic_embedding(points)
+
+        if self.skip_connections:
+            features = self.sdf_mlp(embedded, embedded)
+        else:
+            features = self.sdf_mlp(embedded)
+
+        # Separate heads
+        distance = self.distance_layer(features)  # (N, 1)
+
+        if self.color_layer is not None:
+            color = self.color_layer(features)  # (N, 3)
+        else:
+            color = torch.ones(points.shape[0], 3, device=points.device)
+
+        return distance, color
+
     def forward(self, points):
+        """Default forward: return SDF"""
         return self.get_distance(points)
 
     def get_distance_and_gradient(

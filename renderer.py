@@ -46,6 +46,52 @@ class VolumeRenderer(torch.nn.Module):
 
         return feature
 
+    def _render_with_implicit(self, ray_bundle, implicit_fn, n_pts):
+        """
+        Helper method to render a ray bundle with an implicit function.
+        Used for both coarse and fine passes in hierarchical sampling.
+
+        Args:
+            ray_bundle: RayBundle with sampled points
+            implicit_fn: Implicit function (NeRF network)
+            n_pts: Number of points per ray
+
+        Returns:
+            dict with 'feature', 'depth', and 'weights' keys
+        """
+        # Call implicit function with sample points
+        implicit_output = implicit_fn(ray_bundle)
+        density = implicit_output['density']
+        feature = implicit_output['feature']
+
+        # Compute length of each ray segment
+        depth_values = ray_bundle.sample_lengths[..., 0]
+        deltas = torch.cat(
+            (
+                depth_values[..., 1:] - depth_values[..., :-1],
+                1e10 * torch.ones_like(depth_values[..., :1]),
+            ),
+            dim=-1,
+        )[..., None]
+
+        # Compute aggregation weights
+        weights = self._compute_weights(
+            deltas.view(-1, n_pts, 1),
+            density.view(-1, n_pts, 1)
+        )
+
+        # Render (color) features using weights
+        color = self._aggregate(weights, feature.view(-1, n_pts, feature.shape[-1]))
+
+        # Render depth map
+        depth = torch.sum(weights * depth_values.view(-1, n_pts, 1), dim=1)
+
+        return {
+            'feature': color,
+            'depth': depth,
+            'weights': weights,  # Return weights for hierarchical sampling
+        }
+
     def forward(
         self,
         sampler,
@@ -64,38 +110,8 @@ class VolumeRenderer(torch.nn.Module):
             cur_ray_bundle = sampler(cur_ray_bundle)
             n_pts = cur_ray_bundle.sample_shape[1]
 
-            # Call implicit function with sample points
-            implicit_output = implicit_fn(cur_ray_bundle)
-            density = implicit_output['density']
-            feature = implicit_output['feature']
-
-            # Compute length of each ray segment
-            depth_values = cur_ray_bundle.sample_lengths[..., 0]
-            deltas = torch.cat(
-                (
-                    depth_values[..., 1:] - depth_values[..., :-1],
-                    1e10 * torch.ones_like(depth_values[..., :1]),
-                ),
-                dim=-1,
-            )[..., None]
-
-            # Compute aggregation weights
-            weights = self._compute_weights(
-                deltas.view(-1, n_pts, 1),
-                density.view(-1, n_pts, 1)
-            ) 
-
-            # TODO (1.5): Render (color) features using weights
-            color = self._aggregate(weights, feature.view(-1, n_pts, feature.shape[-1]))
-
-            # TODO (1.5): Render depth map
-            depth = torch.sum(weights * depth_values.view(-1, n_pts, 1), dim=1)
-
-            # Return
-            cur_out = {
-                'feature': color,
-                'depth': depth,
-            }
+            # Render using helper method
+            cur_out = self._render_with_implicit(cur_ray_bundle, implicit_fn, n_pts)
 
             chunk_outputs.append(cur_out)
 
@@ -131,6 +147,8 @@ class SphereTracingRenderer(torch.nn.Module):
         directions, # Nx3
     ):
         '''
+        Sphere tracing algorithm for rendering SDFs.
+
         Input:
             implicit_fn: a module that computes a SDF at a query point
             origins: N_rays X 3
@@ -140,19 +158,48 @@ class SphereTracingRenderer(torch.nn.Module):
                     the point can be arbitrary.
             mask: N_rays X 1 (boolean tensor) denoting which of the input rays intersect the surface.
         '''
-        # TODO (Q5): Implement sphere tracing
-        # 1) Iteratively update points and distance to the closest surface
-        #   in order to compute intersection points of rays with the implicit surface
-        points = origins + directions * self.near
+        N = origins.shape[0]
+        device = origins.device
 
-        # 2) Maintain a mask with the same batch dimension as the ray origins,
-        #   indicating which points hit the surface, and which do not
-        mask = torch.ones(origins.shape[0], 1, device=origins.device, dtype=torch.bool)
-        for _ in range(self.max_iters):
-            sdf = implicit_fn(points)
-            hit = (torch.abs(sdf) < 1e-3)
-            mask = hit | mask
-            points = points + directions * sdf
+        # Initialize ray marching
+        # Start at near plane and march along ray direction
+        t = torch.ones(N, 1, device=device) * self.near  # (N, 1) distance along ray
+        points = origins + t * directions  # (N, 3) current positions
+
+        # Mask tracking which rays have hit the surface
+        hit_mask = torch.zeros(N, 1, device=device, dtype=torch.bool)  # (N, 1)
+
+        # Sphere tracing loop
+        for i in range(self.max_iters):
+            # Query SDF at current points
+            sdf_values = implicit_fn(points)  # (N, 1)
+
+            # Check which rays are close enough to surface (hit condition)
+            # Threshold determines how close we need to be to consider it a "hit"
+            surface_threshold = 1e-3
+            newly_hit = (torch.abs(sdf_values) < surface_threshold)  # (N, 1)
+
+            # Update hit mask (once hit, always hit)
+            hit_mask = hit_mask | newly_hit
+
+            # March forward by the SDF distance (only for rays that haven't hit yet)
+            # Rays that already hit should stop marching
+            active_mask = ~hit_mask  # Rays still marching
+            t = t + sdf_values * active_mask.float()  # Only update active rays
+
+            # Check if we've marched beyond far plane (missed the surface)
+            t = torch.clamp(t, self.near, self.far)
+
+            # Update positions
+            points = origins + t * directions
+
+            # Early termination: if all rays have hit or exceeded far plane
+            if hit_mask.all():
+                break
+
+        # Final mask indicates which rays successfully hit the surface
+        mask = hit_mask
+
         return points, mask
 
     def forward(
@@ -181,8 +228,7 @@ class SphereTracingRenderer(torch.nn.Module):
                     directions=cur_ray_bundle.directions.reshape(-1, 3),
                 )
 
-            # 再进行采样
-            cur_ray_bundle = sampler(cur_ray_bundle)
+            # Sphere tracing already computed intersection points, no sampling needed
             mask = mask.repeat(1,3)
             isect_points = points[mask].view(-1, 3)
 

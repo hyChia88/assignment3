@@ -218,7 +218,7 @@ def render_geometry(
     image_size,
     save=False,
     thresh=0.,
-    file_prefix=''    
+    file_prefix=''
 ):
     device = list(model.parameters())[0].device
     lights = pytorch3d.renderer.PointLights(location=[[0, 0, -3]], device=device)

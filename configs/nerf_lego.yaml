@@ -3,7 +3,7 @@ seed: 1
 type: train_nerf
 
 training:
-  num_epochs: 10
+  num_epochs: 30
   batch_size: 1024
   lr: 0.0005
 
@@ -42,5 +42,4 @@ implicit_function:
   density_noise_std: 0.0
   n_layers_xyz: 6
   append_xyz: [3]
-
 
