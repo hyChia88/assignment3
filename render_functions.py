@@ -246,8 +246,15 @@ def render_geometry(
     file_prefix=''
 ):
     device = list(model.parameters())[0].device
+
+    # Normalize image_size to handle ListConfig from Hydra
+    image_size = _normalize_image_size(image_size)
+    if isinstance(image_size, tuple):
+        image_size = image_size[0]  # Use first dimension for square rendering
+
     lights = pytorch3d.renderer.PointLights(location=[[0, 0, -3]], device=device)
-    mesh_renderer = get_mesh_renderer(image_size=image_size[0], lights=lights, device=device)
+    print(f'Image size: {image_size}')
+    mesh_renderer = get_mesh_renderer(image_size=image_size, lights=lights, device=device)
 
     mesh = implicit_to_mesh(model.implicit_fn, scale=3, device=device, thresh=thresh)
     all_images = []
