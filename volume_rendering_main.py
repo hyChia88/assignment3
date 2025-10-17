@@ -502,11 +502,11 @@ def train_nerf(
                 imageio.mimsave('images/part_3.gif', [np.uint8(im * 255) for im in test_images], loop=0)
                 print("Saved nerf rendering to images/part_3.gif")
                 # Display a few sample images in the notebook
-                fig, axes = plt.subplots(1, min(4, len(all_images)), figsize=(15, 4))
-                if len(all_images) == 1:
+                fig, axes = plt.subplots(1, min(4, len(test_images)), figsize=(15, 4))
+                if len(test_images) == 1:
                     axes = [axes]
                 for i, ax in enumerate(axes):
-                    ax.imshow(all_images[i])
+                    ax.imshow(test_images[i])
                     ax.axis('off')
                     ax.set_title(f'View {i}')
                 plt.tight_layout()
@@ -656,11 +656,11 @@ def train_nerf_coarse_fine(cfg):
                 print(f"Saved rendering to images/part_4_2_epoch_{epoch}.gif")
                 print("Rendered images successfully. save at images/part_1.gif")
                 # Display a few sample images in the notebook
-                fig, axes = plt.subplots(1, min(4, len(all_images)), figsize=(15, 4))
-                if len(all_images) == 1:
+                fig, axes = plt.subplots(1, min(4, len(test_images)), figsize=(15, 4))
+                if len(test_images) == 1:
                     axes = [axes]
                 for i, ax in enumerate(axes):
-                    ax.imshow(all_images[i])
+                    ax.imshow(test_images[i])
                     ax.axis('off')
                     ax.set_title(f'View {i}')
                 plt.tight_layout()
